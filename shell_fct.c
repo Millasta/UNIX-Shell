@@ -8,28 +8,28 @@
 #include <errno.h>
 #include <fcntl.h>
 
-pid_t *pids;
-int nbChildren;
+pid_t *pids;	// Pids of the children
+int nbChildren;	// Number of children required
 
-int execCd(char** args, int nbArgs) {
+int execCd(char **args, int nbArgs) {
     char *path = NULL;
     int pathSize = 0;
-
+	int cdStatus = 0;
+    int i = 0;
+	int j = 0;
     errno = 0;
 
-    // Get the size of the path
-    int i;
-    for(i = 1 ; i < nbArgs; i++)
+    // Gets the size of the path
+    for (i = 1 ; i < nbArgs; i++)
         pathSize += strlen(args[i]);
     pathSize += (nbArgs - 1);
     path = (char*)malloc((pathSize)+1 * sizeof(char));
 
-    // Get all the args into a unique string for the path
-    i = 0;
-    int j;
-    for(j = 1 ; j < nbArgs ; j++) {
-        int k;
-        for(k = 0 ; k < strlen(args[j]) ; k++) {
+    // Gets all the args into a unique string for the path
+
+    for (j = 1, i = 0; j < nbArgs ; j++) {
+        int k = 0;
+        for (k = 0 ; k < strlen(args[j]) ; k++) {
             while(args[j][k] == '\'' || args[j][k] == '\"') // Eliminate ' and " char
                 k++;
             path[i] = args[j][k];
@@ -40,106 +40,170 @@ int execCd(char** args, int nbArgs) {
     }
 
     path[pathSize - 1] = '\0';
-
-    int cdStatus = chdir(path);
+    cdStatus = chdir(path);
     free(path);
     return cdStatus;
 }
 
-//Alarm handler
+// Alarm handler
 void alarmHandler(int sigNum)
 {
 	printf("Alarm handled: killing child processes\n");
     int i;
-    for(i = 0 ; i < nbChildren ; i++)
+    for (i = 0 ; i < nbChildren ; i++)
 	   kill(pids[i], SIGKILL);
 }
 
+// Executes a command
 int exec_command(Cmd* my_cmd){
-    // cd
-    if(strcmp(my_cmd->cmdMembersArgs[0][0], "cd") == 0) {
+
+    /* Handling of non exec-able commands */
+    if (strcmp(my_cmd->cmdMembersArgs[0][0], "cd") == 0) {			// cd command
         execCd(my_cmd->cmdMembersArgs[0], my_cmd->nbMembersArgs[0]);
     }
-    // exit
-    else if(strcmp(my_cmd->cmdMembersArgs[0][0], "exit") == 0) {
-        return MYSHELL_FCT_EXIT; // exit
+    else if (strcmp(my_cmd->cmdMembersArgs[0][0], "exit") == 0) {	// exit command
+        return MYSHELL_FCT_EXIT; 									
     }
-    // others..
-    else {
-        nbChildren = my_cmd->nbCmdMembers;
-        pids = (pid_t*)malloc(sizeof(pid_t) * nbChildren);
+    else { /* Handling of exec-able commands */
+		nbChildren = my_cmd->nbCmdMembers;
+		pids = (pid_t*)malloc(sizeof(pid_t) * nbChildren);
+
+		int pipes[nbChildren][2];
         int status[nbChildren];
-        int pipes[nbChildren][2];
-        int i;
+        int childIdx = 0;
+		int savedStdIn;
+		int fdIn;
+		int fdOut;
+		char buffer[24];
 
-        // Create children processes
-        for(i = 0 ; i < nbChildren ; i++) {
-            pipe(pipes[i]);
-            pids[i] = fork();
-            if(pids[i] < 0) {
-                exit(errno); // ERROR
-            }
-            else if(pids[i] == 0){ // Exec the member's command
-                // connect pipes
-                if(i != 0) {
-                    close(pipes[i-1][1]);
-                    dup2(pipes[i-1][0], 0);
-                    close(pipes[i-1][0]);
+        /* Creates children processes */
+        for (childIdx = 0 ; childIdx < nbChildren ; childIdx++) {
 
-                    close(pipes[i][0]);
-                    dup2(pipes[i][1], 1);
-                    close(pipes[i][1]);
+			/* Creates a pipe */
+			if (pipe(pipes[childIdx]) != 0) {
+				perror("pipe");
+				exit(errno);
+			}
+
+			/* Creates a child process */
+			if ((pids[childIdx] = fork()) < 0) {
+				perror("fork");
+				exit(errno);
+			}
+
+			/* Current child's pattern */
+            if (pids[childIdx] == 0) {
+
+                /* Connects pipes for the current non-first-child */
+                if (childIdx > 0) {
+
+					/* Connects the non-first-child's STDIN with the previous tube's input */
+                    close(pipes[childIdx - 1][1]);
+                    if (dup2(pipes[childIdx - 1][0], STDIN_FILENO) == -1) {
+						perror("dup2");
+						exit(errno);
+					}
+                    close(pipes[childIdx - 1][0]);
+
+					if (childIdx < nbChildren - 1) {
+						/* Connects the non-first-non-last-child's STDOUT with the current tube's output */
+		                close(pipes[childIdx][0]);
+		                if (dup2(pipes[childIdx][1], STDOUT_FILENO) == -1) {
+							perror("dup2");
+							exit(errno);
+						}
+		                close(pipes[childIdx][1]);
+					}
                 }
                 else {
-                    close(pipes[i][0]);
+					/* For the first child, check if there is an input redirection */
+                    if (my_cmd->redirection[0][STDIN_FILENO] != NULL) {
 
-                    if(my_cmd->redirection[0][STDIN_FILENO] != NULL) {
-                        int fdIn = open(my_cmd->redirection[0][STDIN_FILENO], O_RDONLY);
-                        if(fdIn == -1)
+						/* Opens correctly the file */
+                        fdIn = open(my_cmd->redirection[0][STDIN_FILENO], O_RDONLY);
+                        if (fdIn == -1) {
                             printf("Error when openning %s : %s\n", my_cmd->redirection[0][STDIN_FILENO], strerror(errno));
+						}
                         else {
-                            dup2(fdIn, 0);
+							/* Connects the first-child's STDIN with the file */
+                            if (dup2(fdIn, STDIN_FILENO) == -1) {
+								perror("dup2");
+								exit(errno);
+							}
                             close(fdIn);
                         }
                     }
-                    dup2(pipes[i][1], 1);
-                    close(pipes[i][1]);
-                }
-                if(i == (nbChildren-1)) {
-                    int fdOut = -1;
-                    if(my_cmd->redirection[i][STDOUT_FILENO] != NULL) {
-                        if(my_cmd->redirectionType[i][STDOUT_FILENO] == APPEND) {
-                            fdOut = open(my_cmd->redirection[i][STDOUT_FILENO], O_CREAT | O_WRONLY | O_APPEND, S_IRWXU);
-                        }
-                        else if(my_cmd->redirectionType[i][STDOUT_FILENO] == OVERRIDE) {
-                            fdOut = open(my_cmd->redirection[i][STDOUT_FILENO], O_CREAT | O_WRONLY | O_TRUNC, S_IRWXU);
-                        }
-                        else {
-                            printf("Error while redirecting output to %s\n", my_cmd->redirection[i][STDOUT_FILENO]);
-                        }
-                        if(fdOut == -1)
-                            printf("Error when openning %s : %s\n", my_cmd->redirection[0][STDOUT_FILENO], strerror(errno));
-                        dup2(fdOut, 1);
-                        close(fdOut);
-                    }
-                    if(my_cmd->redirection[i][STDERR_FILENO] != NULL) {
-                        if(my_cmd->redirectionType[i][STDERR_FILENO] == APPEND) {
-                            fdOut = open(my_cmd->redirection[i][STDERR_FILENO], O_CREAT | O_WRONLY | O_APPEND, S_IRWXU);
-                        }
-                        else if(my_cmd->redirectionType[i][STDERR_FILENO] == OVERRIDE) {
-                            fdOut = open(my_cmd->redirection[i][STDERR_FILENO], O_CREAT | O_WRONLY | O_TRUNC, S_IRWXU);
-                        }
-                        else {
-                            printf("Error while redirecting output to %s\n", my_cmd->redirection[i][STDERR_FILENO]);
-                        }
-                        if(fdOut == -1)
-                            printf("Error when openning %s : %s\n", my_cmd->redirection[0][STDERR_FILENO], strerror(errno));
-                        dup2(fdOut, 2);
-                        close(fdOut);
-                    }
 
+					/* Connects the first-child's STDOUT with the current tube's output */
+					close(pipes[childIdx][0]);
+                    if (dup2(pipes[childIdx][1], STDOUT_FILENO) == -1) {
+						perror("dup2");
+						exit(errno);
+					}
+                    close(pipes[childIdx][1]);
                 }
-                if(execvp(my_cmd->cmdMembersArgs[i][0], my_cmd->cmdMembersArgs[i]) == -1) {
+
+                if (childIdx == nbChildren - 1) {
+					/* For the last child, check if there is an output or error redirection */
+                    if (my_cmd->redirection[childIdx][STDOUT_FILENO] != NULL) {
+
+						/* Opens correctly the file */
+                        if (my_cmd->redirectionType[childIdx][STDOUT_FILENO] == APPEND) {
+                            fdOut = open(my_cmd->redirection[childIdx][STDOUT_FILENO], O_CREAT | O_WRONLY | O_APPEND, S_IRWXU);
+                        }
+                        else if (my_cmd->redirectionType[childIdx][STDOUT_FILENO] == OVERRIDE) {
+                            fdOut = open(my_cmd->redirection[childIdx][STDOUT_FILENO], O_CREAT | O_WRONLY | O_TRUNC, S_IRWXU);
+                        }
+                        else {
+                            printf("Error while redirecting output to %s\n", my_cmd->redirection[childIdx][STDOUT_FILENO]);
+                        }
+
+                        if (fdOut == -1) {
+                            printf("Error when openning %s : %s\n", my_cmd->redirection[0][STDOUT_FILENO], strerror(errno));
+						}
+
+						/* Connects the last-child's STDERR with the file */
+                        if (dup2(fdOut, STDOUT_FILENO) == -1) {
+							perror("dup2");
+							exit(errno);
+						}
+                        close(fdOut);
+                    }
+                    else if (my_cmd->redirection[childIdx][STDERR_FILENO] != NULL) {
+                        if (my_cmd->redirectionType[childIdx][STDERR_FILENO] == APPEND) {
+                            fdOut = open(my_cmd->redirection[childIdx][STDERR_FILENO], O_CREAT | O_WRONLY | O_APPEND, S_IRWXU);
+                        }
+                        else if (my_cmd->redirectionType[childIdx][STDERR_FILENO] == OVERRIDE) {
+                            fdOut = open(my_cmd->redirection[childIdx][STDERR_FILENO], O_CREAT | O_WRONLY | O_TRUNC, S_IRWXU);
+                        }
+                        else {
+                            printf("Error while redirecting output to %s\n", my_cmd->redirection[childIdx][STDERR_FILENO]);
+                        }
+
+                        if (fdOut == -1) {
+                            printf("Error when openning %s : %s\n", my_cmd->redirection[0][STDERR_FILENO], strerror(errno));
+						}
+
+						/* Connects the last-child's STDERR with the file */
+                        if (dup2(fdOut, STDERR_FILENO) == -1) {
+							perror("dup2");
+							exit(errno);
+						}
+                        close(fdOut);
+                    }
+					else if (childIdx > 0) {
+						/* Connects the last-child's STDOUT with the current tube's output */
+		                close(pipes[childIdx][0]);
+		                if (dup2(pipes[childIdx][1], STDOUT_FILENO) == -1) {
+							perror("dup2");
+							exit(errno);
+						}
+		                close(pipes[childIdx][1]);
+					}
+                }
+
+				/* Executes the command */ 
+                if (execvp(my_cmd->cmdMembersArgs[childIdx][0], my_cmd->cmdMembersArgs[childIdx]) == -1) {
                     perror("execvp");
                     exit(errno);
                 }
@@ -147,39 +211,41 @@ int exec_command(Cmd* my_cmd){
                 exit(EXIT_SUCCESS);
             }
             else {
-                if(i != 0) {
-                    close(pipes[i-1][0]);
-                    close(pipes[i-1][1]);
+                if (childIdx > 0) {
+					// Close the parent's pipes no longer used
+                    close(pipes[childIdx - 1][0]);
+                    close(pipes[childIdx - 1][1]);
                 }
             }
         }
 
-        int savedStdIn = dup(0);
+		/* Once all the children processes are launched */
+        savedStdIn = dup(STDIN_FILENO); // Stores the current STDIN_FILENO of the parent
 
-        close(pipes[i-1][1]);
-        dup2(pipes[i-1][0], 0);
-        close(pipes[i-1][0]);
+        close(pipes[childIdx - 1][1]);
+        dup2(pipes[childIdx - 1][0], STDIN_FILENO);	// Connects the parent's STDIN with the last tube's input
+        close(pipes[childIdx - 1][0]);
 
         // If the process didn't respond for 5 seconds, triggers the alarm
         signal(SIGALRM, alarmHandler);
         alarm(5);
 
-        for(i = 0 ; i < nbChildren ; i++) { // Wait all the children to finish
-            waitpid(pids[i], &status[i], 0);
-            if(!WIFEXITED(status[i]))
-                printf("Process %d didn't exit normally !\n", pids[i]);
+        for (childIdx = 0 ; childIdx < nbChildren ; childIdx++) { // Waits all the children to finish
+            waitpid(pids[childIdx], &status[childIdx], 0);
+            if (!WIFEXITED(status[childIdx]))
+                printf("Process %d didn't exit normally !\n", pids[childIdx]);
         }
 
         alarm(0); // Disabling the alarm if everything's ok
 
-        char buffer[10];
-        while(fgets(buffer, 10, stdin) != NULL)
+        while (fgets(buffer, 24, stdin) != NULL)
             printf("%s", buffer);
 
         free(pids);
 
-        dup2(savedStdIn, 0);
+        dup2(savedStdIn, STDIN_FILENO); // Sets back the correct STDIN_FILENO for the parent
         close(savedStdIn);
     }
+
     return 0; // SUCCESS
 }

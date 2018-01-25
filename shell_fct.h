@@ -1,8 +1,5 @@
 #include "cmd.h"
-//Your imports come here
 
-//Terminate shell
-#define MYSHELL_FCT_EXIT 1
+#define MYSHELL_FCT_EXIT 1 //Terminate shell
 
-//Execute a command
-int exec_command(Cmd *c);
+int exec_command(Cmd *c); // Executes a command

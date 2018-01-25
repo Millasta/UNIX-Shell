@@ -5,38 +5,82 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-//Prints the command
+// Prints the command
 void printCmd(Cmd *cmd){
-	//your implementation comes here
+    int memberIdx = 0;
+	int memberArgIdx = 0;
+	char * filenos[3] = {"STDIN_FILENO", "STDOUT_FILENO", "STDERR_FILENO"};
+	char * macros[2] =  {"APPEND", "OVERRIDE"};
+
+	printf("cmd->initCmd\t\t\t\t = \t%s\n", cmd->initCmd);
+	printf("cmd->nbCmdMembers\t\t\t = \t%d\n", cmd->nbCmdMembers);
+
+	for (memberIdx = 0; memberIdx < cmd->nbCmdMembers; memberIdx++) {
+		printf("cmd->cmdMembers[%d]\t\t\t = \t%s\n", memberIdx, cmd->cmdMembers[memberIdx]);
+	}
+
+	for (memberIdx = 0; memberIdx < cmd->nbCmdMembers; memberIdx++) {
+		printf("cmd->nbMembersArgs[%d]\t\t\t = \t%d\n", memberIdx, cmd->nbMembersArgs[memberIdx]);
+	}
+
+	for (memberIdx = 0; memberIdx < cmd->nbCmdMembers; memberIdx++) {
+		for (memberArgIdx = 0; memberArgIdx < cmd->nbMembersArgs[memberIdx]; memberArgIdx++) {
+			printf("cmd->cmdMembersArgs[%d][%d]\t\t = \t%s\n", memberIdx, memberArgIdx, cmd->cmdMembersArgs[memberIdx][memberArgIdx]);
+		}
+	}	
+
+	for (memberIdx = 0; memberIdx < cmd->nbCmdMembers; memberIdx++) {
+		for (memberArgIdx = 0; memberArgIdx < 3; memberArgIdx++) {
+			printf("cmd->redirection[%d][%s]\t = \t%s\n", memberIdx, filenos[memberArgIdx], cmd->redirection[memberIdx][memberArgIdx]);
+		}
+	}
+
+	for (memberIdx = 0; memberIdx < cmd->nbCmdMembers; memberIdx++) {
+		for (memberArgIdx = 0; memberArgIdx < 3; memberArgIdx++) {
+			if (cmd->redirectionType[memberIdx][memberArgIdx] == APPEND || cmd->redirectionType[memberIdx][memberArgIdx] == OVERRIDE) {
+				printf("cmd->redirectionType[%d][%s]\t = \t%s\n", memberIdx, filenos[memberArgIdx], macros[cmd->redirectionType[memberIdx][memberArgIdx] - 1]);
+			}
+		}
+	}
 }
 
-//Initializes the initial_cmd, membres_cmd et nb_membres fields
+// Initializes the initial_cmd, membres_cmd et nb_membres fields
 void parseMembers(char *inputString, Cmd *cmd){
-    //Your implementation comes here
+	int memberLength;
+	int buffIdx = 1;
+	int memberIdx = 0;
+ 	char strBuff[255];
+    char *currentChar;
+
     cmd->initCmd = strdup(inputString);
     cmd->cmdMembers  = (char**)malloc(sizeof(char*));
     cmd->nbCmdMembers = 0;
-    char *currentChar = &inputString[0];
-    while(*currentChar == ' ')
+
+	memset(strBuff, '\0', 255);
+
+	currentChar = &inputString[0];
+    while (*currentChar == ' ')
         currentChar++;
 
-
-    char strBuff[255];
-    memset(strBuff, '\0', 255);
-    int memberLength;
-    while(*currentChar != '\0') {
+	/* Parses the string a first time and store the members */
+    while (*currentChar != '\0') {
         memberLength = 0;
-        while(*currentChar != '|' && *currentChar != '\0') {
+
+		/* Stores the member in the buffer */
+	    while (*currentChar != '|' && *currentChar != '\0') { 
             strBuff[memberLength] = *currentChar;
             memberLength++;
             currentChar++;
         }
-        int i = 1;
-        while(*(currentChar - i) == ' ') {
+
+		/* Removes the blanks at the end of the buffer */
+        while (*(currentChar - buffIdx) == ' ') {
             strBuff[memberLength - 1] = '\0';
             memberLength--;
-            i++;
+            buffIdx++;
         }
+
+		/* Add the member to the cmd object */
         cmd->nbCmdMembers++;
         cmd->cmdMembers = (char**)realloc(cmd->cmdMembers, sizeof(char*) * cmd->nbCmdMembers);
         cmd->cmdMembers[cmd->nbCmdMembers - 1] = strdup(strBuff);
@@ -45,168 +89,166 @@ void parseMembers(char *inputString, Cmd *cmd){
 
         memset(strBuff, '\0', 255);
 
-        while(*currentChar == ' ' || *currentChar == '|')
+		
+        while (*currentChar == ' ' || *currentChar == '|')
             currentChar++;
     }
 
-    int j;
     cmd->cmdMembersArgs = (char***)malloc(sizeof(char**) * cmd->nbCmdMembers);
     cmd->nbMembersArgs = (unsigned int*)malloc(sizeof(unsigned int) * cmd->nbCmdMembers);
     cmd->redirection = (char***)malloc(sizeof(char**) * cmd->nbCmdMembers);
 
-    for(j = 0 ; j < cmd->nbCmdMembers ; j++) {
-        cmd->cmdMembersArgs[j] = (char**)malloc(sizeof(char*));
-        cmd->redirection[j] = (char**)malloc(sizeof(char*) * 3);
-        cmd->redirection[j][STDIN_FILENO] = NULL;
-        cmd->redirection[j][STDOUT_FILENO] = NULL;
-        cmd->redirection[j][STDERR_FILENO] = NULL;
-        cmd->redirectionType[j] = (int*)malloc(sizeof(int) * 3);
-        cmd->nbMembersArgs[j] = 0;
-        // DEBUG
-        //printf("\nMember : %s\n", cmd->cmdMembers[j]);
-        int index = 0;
-        int indexBuff = 0;
+	/* Parses the members and store the args */
+    for (memberIdx = 0 ; memberIdx < cmd->nbCmdMembers ; memberIdx++) {
+
+        int memberArgIdx = 0;
         int redirectionType = 0;
         char buffer[255];
-        while(cmd->cmdMembers[j][index] != '\0') {
-            cmd->nbMembersArgs[j]++;
-            indexBuff = 0;
+
+		buffIdx = 0;
+
+        cmd->cmdMembersArgs[memberIdx] = (char**)malloc(sizeof(char*));
+        cmd->redirection[memberIdx] = (char**)malloc(sizeof(char*) * 3);
+        cmd->redirection[memberIdx][STDIN_FILENO] = NULL;
+        cmd->redirection[memberIdx][STDOUT_FILENO] = NULL;
+        cmd->redirection[memberIdx][STDERR_FILENO] = NULL;
+        cmd->redirectionType[memberIdx] = (int*)malloc(sizeof(int) * 3);
+        cmd->nbMembersArgs[memberIdx] = 0;
+
+        while (cmd->cmdMembers[memberIdx][memberArgIdx] != '\0') {
+            cmd->nbMembersArgs[memberIdx]++;
+            buffIdx = 0;
 
             // Redirection
-            if((cmd->cmdMembers[j][index] == '2' && cmd->cmdMembers[j][index + 1] == '>') || cmd->cmdMembers[j][index] == '>') {
+            if ((cmd->cmdMembers[memberIdx][memberArgIdx] == '2' && cmd->cmdMembers[memberIdx][memberArgIdx + 1] == '>') || cmd->cmdMembers[memberIdx][memberArgIdx] == '>') {
                 int error = 0;
-                if(cmd->cmdMembers[j][index] == '2') {
-                    index++;
+                if (cmd->cmdMembers[memberIdx][memberArgIdx] == '2') {
+                    memberArgIdx++;
                     error = 1;
                 }
                 redirectionType = OVERRIDE;
-                index++;
+                memberArgIdx++;
 
-                if(cmd->cmdMembers[j][index] == '>')
+                if (cmd->cmdMembers[memberIdx][memberArgIdx] == '>')
                     redirectionType = APPEND;
-                index++;
+                memberArgIdx++;
 
                 // Reaching next non-space char
-                while(cmd->cmdMembers[j][index] == ' ')
-                    index++;
+                while (cmd->cmdMembers[memberIdx][memberArgIdx] == ' ')
+                    memberArgIdx++;
 
-                while(cmd->cmdMembers[j][index] != '|' && cmd->cmdMembers[j][index] != '\0') {
-                    buffer[indexBuff] = cmd->cmdMembers[j][index];
-                    indexBuff++;
-                    index++;
+                while (cmd->cmdMembers[memberIdx][memberArgIdx] != '|' && cmd->cmdMembers[memberIdx][memberArgIdx] != '\0') {
+                    buffer[buffIdx] = cmd->cmdMembers[memberIdx][memberArgIdx];
+                    buffIdx++;
+                    memberArgIdx++;
                 }
-                buffer[indexBuff] = '\0';
+                buffer[buffIdx] = '\0';
 
                 //Clearing spaces at the end of the buff
-                while(buffer[indexBuff - 1] == ' ') {
-                    buffer[indexBuff - 1] = '\0';
-                    indexBuff--;
+                while (buffer[buffIdx - 1] == ' ') {
+                    buffer[buffIdx - 1] = '\0';
+                    buffIdx--;
                 }
 
-                if(!error) {
-                    cmd->redirection[j][STDOUT_FILENO] = (char*)malloc(sizeof(char) * strlen(buffer));
-                    cmd->redirection[j][STDOUT_FILENO] = strdup(buffer);
-                    cmd->redirectionType[j][STDOUT_FILENO] = redirectionType;
+                if (!error) {
+                    cmd->redirection[memberIdx][STDOUT_FILENO] = (char*)malloc(sizeof(char) * strlen(buffer));
+                    cmd->redirection[memberIdx][STDOUT_FILENO] = strdup(buffer);
+                    cmd->redirectionType[memberIdx][STDOUT_FILENO] = redirectionType;
                 }
                 else {
-                    cmd->redirection[j][STDERR_FILENO] = (char*)malloc(sizeof(char) * strlen(buffer));
-                    cmd->redirection[j][STDERR_FILENO] = strdup(buffer);
-                    cmd->redirectionType[j][STDERR_FILENO] = redirectionType;
+                    cmd->redirection[memberIdx][STDERR_FILENO] = (char*)malloc(sizeof(char) * strlen(buffer));
+                    cmd->redirection[memberIdx][STDERR_FILENO] = strdup(buffer);
+                    cmd->redirectionType[memberIdx][STDERR_FILENO] = redirectionType;
                 }
-                cmd->nbMembersArgs[j]--;
+                cmd->nbMembersArgs[memberIdx]--;
 
                 // Reaching the next non-space char
-                while(cmd->cmdMembers[j][index] == ' ')
-                    index++;
+                while (cmd->cmdMembers[memberIdx][memberArgIdx] == ' ')
+                    memberArgIdx++;
             }
-            else if(cmd->cmdMembers[j][index] == '<') {
+            else if (cmd->cmdMembers[memberIdx][memberArgIdx] == '<') {
                 redirectionType = OVERRIDE;
-                index++;
-                if(cmd->cmdMembers[j][index] == '<')
+                memberArgIdx++;
+                if (cmd->cmdMembers[memberIdx][memberArgIdx] == '<')
                     redirectionType = APPEND;
-                index++;
+                memberArgIdx++;
 
                 // Reaching the next non-space char
-                while(cmd->cmdMembers[j][index] == ' ')
-                    index++;
+                while (cmd->cmdMembers[memberIdx][memberArgIdx] == ' ')
+                    memberArgIdx++;
 
-                while(cmd->cmdMembers[j][index] != '|' && cmd->cmdMembers[j][index] != '\0' && cmd->cmdMembers[j][index] != '>') {
-                    buffer[indexBuff] = cmd->cmdMembers[j][index];
-                    indexBuff++;
-                    index++;
+                while (cmd->cmdMembers[memberIdx][memberArgIdx] != '|' && cmd->cmdMembers[memberIdx][memberArgIdx] != '\0' && cmd->cmdMembers[memberIdx][memberArgIdx] != '>') {
+                    buffer[buffIdx] = cmd->cmdMembers[memberIdx][memberArgIdx];
+                    buffIdx++;
+                    memberArgIdx++;
                 }
-                buffer[indexBuff] = '\0';
+                buffer[buffIdx] = '\0';
 
-                //Clearing spaces at the end of the buff
-                while(buffer[indexBuff - 1] == ' ') {
-                    buffer[indexBuff - 1] = '\0';
-                    indexBuff--;
+                // Clearing spaces at the end of the buff
+                while (buffer[buffIdx - 1] == ' ') {
+                    buffer[buffIdx - 1] = '\0';
+                    buffIdx--;
                 }
 
-                cmd->redirection[j][STDIN_FILENO] = (char*)malloc(sizeof(char) * strlen(buffer));
-                cmd->redirection[j][STDIN_FILENO] = strdup(buffer);
-                cmd->redirectionType[j][STDIN_FILENO] = redirectionType;
-                cmd->nbMembersArgs[j]--;
+                cmd->redirection[memberIdx][STDIN_FILENO] = (char*)malloc(sizeof(char) * strlen(buffer));
+                cmd->redirection[memberIdx][STDIN_FILENO] = strdup(buffer);
+                cmd->redirectionType[memberIdx][STDIN_FILENO] = redirectionType;
+                cmd->nbMembersArgs[memberIdx]--;
 
                 // Reaching the next non-space char
-                while(cmd->cmdMembers[j][index] == ' ')
-                    index++;
+                while (cmd->cmdMembers[memberIdx][memberArgIdx] == ' ')
+                    memberArgIdx++;
             }
-
             else {
-                while(cmd->cmdMembers[j][index] != '\0' && cmd->cmdMembers[j][index] != ' ') {
-                    buffer[indexBuff] = cmd->cmdMembers[j][index];
-                    index++;
-                    indexBuff++;
+                while (cmd->cmdMembers[memberIdx][memberArgIdx] != '\0' && cmd->cmdMembers[memberIdx][memberArgIdx] != ' ') {
+                    buffer[buffIdx] = cmd->cmdMembers[memberIdx][memberArgIdx];
+                    memberArgIdx++;
+                    buffIdx++;
                 }
 
-                // Adding arg
-                buffer[indexBuff] = '\0';
-                cmd->cmdMembersArgs[j] = (char**)realloc(cmd->cmdMembersArgs[j], sizeof(char*) * cmd->nbMembersArgs[j]);
-                cmd->cmdMembersArgs[j][cmd->nbMembersArgs[j]-1] = (char*)malloc(sizeof(char) * strlen(buffer));
-                cmd->cmdMembersArgs[j][cmd->nbMembersArgs[j]-1] = strdup(buffer);
-                while(cmd->cmdMembers[j][index] == ' ')
-                    index++;
+                // Adding the argument
+                buffer[buffIdx] = '\0';
+                cmd->cmdMembersArgs[memberIdx] = (char**)realloc(cmd->cmdMembersArgs[memberIdx], sizeof(char*) * cmd->nbMembersArgs[memberIdx]);
+                cmd->cmdMembersArgs[memberIdx][cmd->nbMembersArgs[memberIdx] - 1] = (char*)malloc(sizeof(char) * strlen(buffer));
+                cmd->cmdMembersArgs[memberIdx][cmd->nbMembersArgs[memberIdx] - 1] = strdup(buffer);
+                while (cmd->cmdMembers[memberIdx][memberArgIdx] == ' ')
+                    memberArgIdx++;
             }
         }
 
         // Adding the NULL pointer for execvp()
-        cmd->cmdMembersArgs[j] = (char**)realloc(cmd->cmdMembersArgs[j], sizeof(char*) * (cmd->nbMembersArgs[j] + 1));
-        cmd->cmdMembersArgs[j][cmd->nbMembersArgs[j]] = NULL;
-
-        // DEBUG
-        /*printf("Nb args : %d\n", cmd->nbMembersArgs[j]);
-        printf("Redirection :\n");
-        if(cmd->redirection[j][STDIN_FILENO] != NULL) {
-            printf("STDIN : %s Type : %d\n", cmd->redirection[j][STDIN_FILENO], cmd->redirectionType[j][STDIN_FILENO]);
-        }
-        if(cmd->redirection[j][STDOUT_FILENO] != NULL) {
-            printf("STDOUT : %s Type : %d\n", cmd->redirection[j][STDOUT_FILENO], cmd->redirectionType[j][STDOUT_FILENO]);
-        }
-        if(cmd->redirection[j][STDERR_FILENO] != NULL) {
-            printf("STDERR : %s Type : %d\n", cmd->redirection[j][STDERR_FILENO], cmd->redirectionType[j][STDERR_FILENO]);
-        }*/
+        cmd->cmdMembersArgs[memberIdx] = (char**)realloc(cmd->cmdMembersArgs[memberIdx], sizeof(char*) * (cmd->nbMembersArgs[memberIdx] + 1));
+        cmd->cmdMembersArgs[memberIdx][cmd->nbMembersArgs[memberIdx]] = NULL;
     }
+
+	//printCmd(cmd);
 }
 
-//Frees memory associated to a cmd
+// Frees memory associated to a cmd
 void freeCmd(Cmd * cmd){
-    int i;
-    for(i = 0 ; i < cmd->nbCmdMembers ; i++) {
-        int j;
-        for(j = 0 ; j < cmd->nbMembersArgs[i] ; j++)
-            free(cmd->cmdMembersArgs[i][j]);
-        if(cmd->redirection[i][STDIN_FILENO] != NULL)
-            free(cmd->redirection[i][STDIN_FILENO]);
-        if(cmd->redirection[i][STDOUT_FILENO] != NULL)
-            free(cmd->redirection[i][STDOUT_FILENO]);
-        if(cmd->redirection[i][STDERR_FILENO] != NULL)
-            free(cmd->redirection[i][STDERR_FILENO]);
-        free(cmd->cmdMembers[i]);
-        free(cmd->redirection[i]);
-        free(cmd->redirectionType[i]);
-        free(cmd->cmdMembersArgs[i]);
+    int memberIdx = 0;
+	int memberArgIdx = 0;
+
+    for (memberIdx = 0 ; memberIdx < cmd->nbCmdMembers ; memberIdx++) {
+        for (memberArgIdx = 0 ; memberArgIdx < cmd->nbMembersArgs[memberIdx] ; memberArgIdx++) {
+            free(cmd->cmdMembersArgs[memberIdx][memberArgIdx]);
+	}
+		    if (cmd->redirection[memberIdx][STDIN_FILENO] != NULL) {
+		        free(cmd->redirection[memberIdx][STDIN_FILENO]);
+			}
+		    if (cmd->redirection[memberIdx][STDOUT_FILENO] != NULL) {
+		        free(cmd->redirection[memberIdx][STDOUT_FILENO]);
+			}
+		    if (cmd->redirection[memberIdx][STDERR_FILENO] != NULL) {
+		        free(cmd->redirection[memberIdx][STDERR_FILENO]);
+			}		
+
+        free(cmd->cmdMembers[memberIdx]);
+        free(cmd->redirection[memberIdx]);
+        free(cmd->redirectionType[memberIdx]);
+        free(cmd->cmdMembersArgs[memberIdx]);
     }
+
     free(cmd->redirectionType);
     free(cmd->redirection);
     free(cmd->nbMembersArgs);
